@@ -3,11 +3,15 @@
 #include <GL/glu.h>
 #include <GL/glut.h>
 
+#include "bitmap.h"
 #include "glutwidget.hpp"
 #include "shader_utils.hpp"
 #include <iostream>
 #include <cmath>
 #include <ctime>
+#include <algorithm>
+
+#define PI 3.1415926
 
 int glutWidget::m_pos_attribute_location;
 unsigned int glutWidget::m_vertexbuffer;
@@ -15,6 +19,174 @@ unsigned int glutWidget::m_frame;
 unsigned int glutWidget::m_program;
 unsigned int glutWidget::m_vertexsh;
 unsigned int glutWidget::m_fragmentsh;
+int glutWidget::x0 = 0;
+int glutWidget::y0 = 0;
+float glutWidget::rotx = 0;
+float glutWidget::roty = 0;
+float glutWidget::rotz = 0;
+float glutWidget::cposx = 0;
+float glutWidget::cposy = 0;
+float glutWidget::cposz = 5;
+
+static int degree = 20;
+static float t;
+
+static unsigned int m_texture;
+
+GLfloat M[16];
+
+GLfloat cpoints[][3] = {
+        {2.0f, 3.0f, 0.0f},
+        {1.8f, 2.7f, 0.0f},
+        {2.8f, 2.2f, 0.0f},
+        {3.0f, 1.0f, 0.0f},
+        {1.0f, -1.0f, 0.0f}
+};
+size_t npts = 20;
+size_t sec = 40;
+
+struct vec4f {
+    float x, y, z, w;
+    vec4f() : x(0.0f),y(0.0f),z(0.0f),w(1.0f) {
+    }
+    vec4f(float x, float y, float z) : x(x),y(y),z(z),w(1.0f) {
+    }
+    vec4f(float x, float y, float z, float w) : x(x),y(y),z(z),w(w) {
+    }
+    //getter
+    float operator[] (size_t i) const {
+        switch(i) {
+            case 0:
+                return x;
+            case 1:
+                return y;
+            case 2:
+                return z;
+            case 3:
+                return w;
+        }
+    }
+    //setter
+    float & operator[] (size_t i) {
+        switch(i) {
+            case 0:
+                return x;
+            case 1:
+                return y;
+            case 2:
+                return z;
+            case 3:
+                return w;
+        }
+    }
+    vec4f operator- (const vec4f & rhs) const {
+        vec4f res(*this);
+        res.x -= rhs.x;
+        res.y -= rhs.y;
+        res.z -= rhs.z;
+        return res;
+    }
+    float norm() const {
+        float len = 0.0;
+        len = sqrt(x*x+y*y+z*z);
+        return len;
+    }
+    void normalize() {
+        float len = norm();
+        x /= len;
+        y /= len;
+        z /= len;
+    }
+    vec4f cross(const vec4f & rhs) const {
+        vec4f out;
+        out.x = y*rhs.z - z*rhs.y;
+        out.y = z*rhs.x - x*rhs.z;
+        out.z = x*rhs.y - y*rhs.x;
+        return out;
+    }
+};
+
+vec4f multiply(GLfloat * m, vec4f & v) {
+    // v' = m*v
+    vec4f v_new;
+    for(size_t i=0; i<4; ++i) {
+        GLfloat vi = v[i];
+        for(size_t j=0; j<4; ++j) {
+            v_new[j] += m[4*i+j]*vi;
+        }
+    }
+    return v_new;
+}
+
+void bezier(float t, float & x, float & y, float & z) {
+    // nice to pre-compute 1-t because we will need it frequently
+    float it = 1.0f -t;
+
+    // calculate blending functions
+    float b0 = 1*t*t*t*t;
+    float b1 = 4*t*t*t*it;
+    float b2 = 6*t*t*it*it;
+    float b3 = 4*t*it*it*it;
+    float b4 = 1*it*it*it*it;
+
+    // calculate the x,y and z of the curve point by summing
+    // the Control vertices weighted by their respective blending
+    // functions
+    x = b0*cpoints[0][0] +
+        b1*cpoints[1][0] +
+        b2*cpoints[2][0] +
+        b3*cpoints[3][0] +
+        b4*cpoints[4][0];
+
+    y = b0*cpoints[0][1] +
+        b1*cpoints[1][1] +
+        b2*cpoints[2][1] +
+        b3*cpoints[3][1] +
+        b4*cpoints[4][1];
+
+    z = b0*cpoints[0][2] +
+        b1*cpoints[1][2] +
+        b2*cpoints[2][2] +
+        b3*cpoints[3][2] +
+        b4*cpoints[4][2];
+}
+
+GLfloat * myRotatef(GLfloat * m, GLfloat angle, GLfloat x, GLfloat y, GLfloat z) {
+    GLfloat len = sqrt(x*x+y*y+z*z);
+    x /= len;
+    y /= len;
+    z /= len;
+
+    GLfloat rangle = angle*PI/180.0f;
+    GLfloat vcos = cos(rangle);
+    GLfloat ivcos = 1.0f-vcos;
+    GLfloat vsin = sin(rangle);
+
+    // 1st col
+    m[0] = x*x*ivcos +vcos;
+    m[1] = x*y*ivcos +z*vsin;
+    m[2] = x*z*ivcos -y*vsin;
+    m[3] = 0.0f;
+    // 2nd col
+    m[4] = y*x*ivcos -z*vsin;
+    m[5] = y*y*ivcos +vcos;
+    m[6] = y*z*ivcos +x*vsin;
+    m[7] = 0.0f;
+    // 3rd col
+    m[8] = z*x*ivcos +y*vsin;
+    m[9] = z*y*ivcos -x*vsin;
+    m[10] = z*z*ivcos +vcos;
+    m[11] = 0.0f;
+    // 4rd col
+    m[12] = 0.0f;
+    m[13] = 0.0f;
+    m[14] = 0.0f;
+    m[15] = 1.0f;
+
+//    glMultMatrixf(m);
+    return m;
+}
+
 
 
 /*
@@ -26,12 +198,13 @@ glutWidget::glutWidget(int argc, char** argv)
     glutInitWindowSize(glutWidget::m_width, glutWidget::m_height);
     glutInit(&argc,argv);
     glutInitDisplayString("samples rgb double depth");
-    glutCreateWindow("Bezier");
+    glutCreateWindow("Vase");
     glutMouseFunc(mouseHandler);     //what to call when user clicks or scrolls
     glutKeyboardFunc(keyDown);       //what to call when user presses a key
     glutKeyboardUpFunc(keyUp);       //what to call when user releases a key
     glutSpecialFunc(specialKeyDown); //what to call when user presses a special key
     glutSpecialFunc(specialKeyUp);   //what to call when user releases a special key
+    glutMotionFunc(mouseMove);       //what to call when user moves the mouse
     glutDisplayFunc(render);         //what to call when window needs redrawing
     glutIdleFunc(update);            //what to call when no user input given
     initOpenGL();
@@ -93,6 +266,18 @@ void glutWidget::initOpenGL()
     
     float data[] = {0.0, 0.05, 0.0, 0.0, -0.05, 0.0, 0.1, 0.0, 0.0};
     
+    CBitmap image("texture.bmp");               //read bitmap image
+    glGenTextures(1, &m_texture);               //allocate 1 texture
+    glBindTexture(GL_TEXTURE_2D, m_texture);    //bind this texture to be active
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.GetWidth(), image.GetHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, image.GetBits());
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);   //specify minificaton filtering
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);   //specify magnificaton filtering
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);        //specify texture coordinate treatment
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);        //specify texture coordinate treatment
+
+    glBindTexture(GL_TEXTURE_2D, 0);    //bind default texture to be active
+    
     //Initialize vertex buffer
     glGenBuffers(1, &m_vertexbuffer);               //generate a vertex buffer
     glBindBuffer(GL_ARRAY_BUFFER, m_vertexbuffer);  //bind buffer to be active
@@ -104,9 +289,14 @@ void glutWidget::initOpenGL()
     
     makeShaders();          //load data of fragment and vertex programs/shaders - compile shaders
     
-    glEnable(GL_MAP1_VERTEX_3);
+    glMatrixMode(GL_PROJECTION);       
+    glLoadIdentity();                                             //initializes projection matrix with identity
+    gluPerspective(60,(float)m_width/(float)m_height,0.1,100);  //set up projection mode (field of view, aspect ratio, near and far clipping plane)
     
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();                       //initializes modelview matrix with identity
     
+    glDisable(GL_CULL_FACE);
 }
 
 
@@ -117,145 +307,225 @@ void glutWidget::render()
 {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);     //clears color and depth bits of framebuffer
     
-    //Convenience variables
-    float t = (float) ((int) (((float) clock()) * 50.0 / CLOCKS_PER_SEC) % 30) / 30.0;
-    int t2 = ((int) (((float) clock()) * 50.0 / CLOCKS_PER_SEC) % 360) / 30;
-    float t3 = (float) clock() * 5.0 / CLOCKS_PER_SEC;
-    float ampl1 = 0.15, ampl2 = 0.1;
+    t = glutGet(GLUT_ELAPSED_TIME) / 1000.0f * (float)degree;
+    
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    gluLookAt(10 * sin(roty), 10 * sin(rotx), 10 * cos(roty),0,0,0,0,1,0);
+    
+    float angle = -360.0f/sec;
+    myRotatef(M, angle, 0.0f,1.0f,0.0f);
+    
+    vec4f * curr_curves = new vec4f[npts];
+    vec4f * next_curves = new vec4f[npts];
+    for(int j=0; j<npts; ++j) {
+        float u = (npts-j-1)*1.0/(npts-1);
+        bezier(u, curr_curves[j].x, curr_curves[j].y, curr_curves[j].z);
+    }
+    
+    vec4f curr_norm, next_norm;
+    
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, m_texture);
+    //glUseProgram(m_program);
+    
+    for(int i=0; i<sec; ++i) {
+
+        glBegin(GL_TRIANGLE_STRIP);
+        for(int j=0; j<npts; ++j) {
+            next_curves[j] = multiply(M, curr_curves[j]);
+            if(j>0) {
+                curr_norm = curr_curves[j] - curr_curves[j-1];
+                curr_norm.normalize();
+                next_norm = next_curves[j] - next_curves[j-1];
+                next_norm.normalize();
+            }
+            else {
+                curr_norm.x = cpoints[1][0]-cpoints[0][0];
+                curr_norm.y = cpoints[1][1]-cpoints[0][1];
+                curr_norm.z = cpoints[1][2]-cpoints[0][2];
+                curr_norm.normalize();
+                next_norm = multiply(M, curr_norm);
+            }
+            vec4f invec(-curr_curves[j].x, 0.0f, -curr_curves[j].z);
+            vec4f outvec = curr_norm.cross(invec);
+            curr_norm = curr_norm.cross(outvec);
+            curr_norm.normalize();
+            //
+            vec4f invec2(-next_curves[j].x, 0.0f, -next_curves[j].z);
+            vec4f outvec2 = next_norm.cross(invec2);
+            next_norm = next_norm.cross(outvec2);
+            next_norm.normalize();
+
+            float u = j*1.0f/(npts-1);
+            glColor3f(1.0f,1.0f,1.0f); glTexCoord2f((float)(i+0)/sec, -u); glNormal3f(curr_norm.x,curr_norm.y,curr_norm.z); glVertex3f(curr_curves[j].x, curr_curves[j].y, curr_curves[j].z);
+            glColor3f(1.0f,1.0f,1.0f); glTexCoord2f((float)(i+1)/sec, -u); glNormal3f(next_norm.x,next_norm.y,next_norm.z); glVertex3f(next_curves[j].x, next_curves[j].y, next_curves[j].z);
+        }
+        glEnd();
+        
+        //Draw base of vase
+        glBegin(GL_TRIANGLES);
+            glColor3f(1.0f,1.0f,1.0f); glNormal3f(0.0f,-1.0f,0.0f); glVertex3f(next_curves[npts-1].x, next_curves[npts-1].y, next_curves[npts-1].z);
+            glColor3f(1.0f,1.0f,1.0f); glNormal3f(0.0f, -1.0f, 0.0f); glVertex3f(0.0f, cpoints[4][1], 0.0f);
+            glColor3f(1.0f,1.0f,1.0f); glNormal3f(0.0f,-1.0f,0.0f); glVertex3f(curr_curves[npts-1].x, curr_curves[npts-1].y, curr_curves[npts-1].z);
+        glEnd();
+
+        std::swap(curr_curves, next_curves);
+        myRotatef(M, angle, 0.0f,1.0f,0.0f);
+    }
+        
+    //glUseProgram(0);
+    glDisable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    delete [] curr_curves;
+    delete [] next_curves;
+
+
     
     //These are the control points for the bezier curves
-    GLfloat curves[12][4][3] =
-    {
-        {
-            {-0.752, 0.124, 0.0},
-            {-0.572, 0.36, 0.0},
-            {0.188, 0.156, 0.0},
-            {0.244, 0.336, 0.0}
-        },
-        {
-            {0.244, 0.336, 0.0},
-            {0.3, 0.516, 0.0},
-            {0.268, 0.744, 0.0},
-            {0.416, 0.424, 0.0}
-        },
-        {
-            {0.416, 0.424, 0.0},
-            {0.48132, 0.28272, 0.0},
-            {0.436, 0.296, 0.0},
-            {0.58, 0.22, 0.0}
-        },
-        {
-            {0.58, 0.22, 0.0},
-            {0.724, 0.144, 0.0},
-            {0.80952, 0.0728, 0.0},
-            {0.84, 0.028, 0.0}
-        },
-        {
-            {0.84, 0.028, 0.0},
-            {0.908, -0.072, 0.0},
-            {0.448, -0.036, 0.0},
-            {0.348, -0.032, 0.0}
-        },
-        {
-            {0.348, -0.032, 0.0},
-            {0.248, -0.028, 0.0},
-            {0.38 + ampl1 * sin(t3), -0.792, 0.0}, //Foot start
-            {0.232 + ampl1 * sin(t3), -0.596, 0.0}
-        },
-        {
-            {0.232 + ampl1 * sin(t3), -0.596, 0.0},
-            {0.084 + ampl1 * sin(t3), -0.4, 0.0}, //Foot end
-            {0.15772, -0.1828, 0.0},
-            {0.1, -0.14, 0.0}
-        },
-        {
-            {0.1, -0.14, 0.0},
-            {0.04248, -0.09736, 0.0},
-            {-0.25096, -0.14956, 0.0},
-            {-0.284, -0.22, 0.0}
-        },
-        {
-            {-0.284, -0.22, 0.0},
-            {-0.3244, -0.30612, 0.0},
-            {-0.2664 + ampl2 * sin(t3 + 2.0), -0.44784, 0.0}, //Foot start
-            {-0.324 + ampl2 * sin(t3 + 2.0), -0.56, 0.0}
-        },
-        {
-            {-0.324 + ampl2 * sin(t3 + 2.0), -0.56, 0.0},
-            {-0.476 + ampl2 * sin(t3 + 2.0), -0.856, 0.0}, //Foot end
-            {-0.5136, -0.33052, 0.0},
-            {-0.608, -0.212, 0.0}
-        },
-        {
-            {-0.608, -0.212, 0.0},
-            {-0.65616, -0.15152, 0.0},
-            {-0.73004, -0.15228, 0.0},
-            {-0.776, -0.328, 0.0}
-        },
-        {
-            {-0.776, -0.328, 0.0},
-            {-0.912, -0.848, 0.0},
-            {-0.932, -0.108, 0.0},
-            {-0.752, 0.124, 0.0}
-        }
-    };
-    
-    
-    //Manually evaluate the bezier curves
-    float s = 1 - t;
-    float AB[2] = {curves[t2][0][0]*s + curves[t2][1][0]*t, curves[t2][0][1]*s + curves[t2][1][1]*t};
-    float BC[2] = {curves[t2][1][0]*s + curves[t2][2][0]*t, curves[t2][1][1]*s + curves[t2][2][1]*t};
-    float CD[2] = {curves[t2][2][0]*s + curves[t2][3][0]*t, curves[t2][2][1]*s + curves[t2][3][1]*t};
-    float ABC[2] = {AB[0]*s + BC[0]*t, AB[1]*s + BC[1]*t};
-    float BCD[2] = {BC[0]*s + CD[0]*t, BC[1]*s + CD[1]*t};
-    float pos[2] = {ABC[0]*s + BCD[0]*t, ABC[1]*s + BCD[1]*t};
-    float slope = (ABC[1] - BCD[1]) / (ABC[0] - BCD[0]);
-    float theta = atan(slope);
+//    GLfloat curves[12][6][3] =
+//    {
+//        {
+//            {0.332, 0.564, -0},
+//            {0.26, 0.296, -0},
+//            {0.272, 0.06, -0},
+//            {0.384, -0.08, -0},
+//            {0.404, -0.252, -0},
+//            {0.308, -0.384, -0},
+//        },
+//        {
+//            {0.28752, 0.564, -0.166},
+//            {0.225167, 0.296, -0.13},
+//            {0.235559, 0.06, -0.136},
+//            {0.332554, -0.08, -0.192},
+//            {0.349874, -0.252, -0.202},
+//            {0.266736, -0.384, -0.154}
+//        },
+//        {
+//            {0.166, 0.564, -0.28752},
+//            {0.13, 0.296, -0.225167},
+//            {0.136, 0.06, -0.235559},
+//            {0.192, -0.08, -0.332554},
+//            {0.202, -0.252, -0.349874},
+//            {0.154, -0.384, -0.266736}
+//        },
+//        {
+//            {5.95906e-10, 0.564, -0.332},
+//            {4.66673e-10, 0.296, -0.26},
+//            {4.88212e-10, 0.06, -0.272},
+//            {6.8924e-10, -0.08, -0.384},
+//            {7.25138e-10, -0.252, -0.404},
+//            {5.52828e-10, -0.384, -0.308},
+//        },
+//        {
+//            {-0.166, 0.564, -0.28752},
+//            {-0.13, 0.296, -0.225167},
+//            {-0.136, 0.06, -0.235559},
+//            {-0.192, -0.08, -0.332554},
+//            {-0.202, -0.252, -0.349874},
+//            {-0.154, -0.384, -0.266736},
+//        },
+//        {
+//            {-0.28752, 0.564, -0.166},
+//            {-0.225167, 0.296, -0.13},
+//            {-0.235559, 0.06, -0.136},
+//            {-0.332554, -0.08, -0.192},
+//            {-0.349874, -0.252, -0.202},
+//            {-0.266736, -0.384, -0.154},
+//        },
+//        {
+//            {-0.332, 0.564, -1.19181e-09},
+//            {-0.26, 0.296, -9.33346e-10},
+//            {-0.272, 0.06, -9.76424e-10},
+//            {-0.384, -0.08, -1.37848e-09},
+//            {-0.404, -0.252, -1.45028e-09},
+//            {-0.308, -0.384, -1.10566e-09}
+//        },
+//        {
+//            {-0.28752, 0.564, 0.166},
+//            {-0.225167, 0.296, 0.13},
+//            {-0.235559, 0.06, 0.136},
+//            {-0.332554, -0.08, 0.192},
+//            {-0.349874, -0.252, 0.202},
+//            {-0.266736, -0.384, 0.154}
+//        },
+//        {
+//            {-0.166, 0.564, 0.28752},
+//            {-0.13, 0.296, 0.225167},
+//            {-0.136, 0.06, 0.235559},
+//            {-0.192, -0.08, 0.332554},
+//            {-0.202, -0.252, 0.349874},
+//            {-0.154, -0.384, 0.266736}
+//        },
+//        {
+//            {-1.78772e-09, 0.564, 0.332},
+//            {-1.40002e-09, 0.296, 0.26},
+//            {-1.46464e-09, 0.06, 0.272},
+//            {-2.06772e-09, -0.08, 0.384},
+//            {-2.17541e-09, -0.252, 0.404},
+//            {-1.65848e-09, -0.384, 0.308}
+//        },
+//        {
+//            {0.166, 0.564, 0.28752},
+//            {0.13, 0.296, 0.225167},
+//            {0.136, 0.06, 0.235559},
+//            {0.192, -0.08, 0.332554},
+//            {0.202, -0.252, 0.349874},
+//            {0.154, -0.384, 0.266736}
+//        },
+//        {
+//            {0.28752, 0.564, 0.166},
+//            {0.225167, 0.296, 0.13},
+//            {0.235559, 0.06, 0.136},
+//            {0.332554, -0.08, 0.192},
+//            {0.349874, -0.252, 0.202},
+//            {0.266736, -0.384, 0.154}
+//        }
+//    };
     
     //Rotation/translation matrix
-    float matrix[4][4] = 
-    {
-        {cos(theta), -sin(theta), 0, 0},
-        {sin(theta), cos(theta), 0, 0},
-        {0, 0, 1, 0},
-        {pos[0], pos[1], 0, 1}
-    };
+//    float matrix[4][4] = 
+//    {
+//        {cos(), 0, -sin(), 0},
+//        {0, 1, 0, 0},
+//        {-sin(), 0, cos(), 0},
+//        {0, 0, 0, 1}
+//    };
     
-    //Keep the texture pointing in the right direction throughout the loop
-    if((ABC[0] - BCD[0]) < 0)
-    {
-        matrix[0][1] = -(matrix[0][1]);
-        matrix[1][0] = -(matrix[1][0]);
-    }
-    else if((ABC[0] - BCD[0]) > 0)
-    {
-        matrix[0][0] = -(matrix[0][0]);
-        matrix[1][1] = -(matrix[1][1]);
-    }
     
-    //Since we aren't using it for anything else, we'll use the ModelView matrix
-    //to store our transformations. This way we don't have to manually pass the
-    //matrix to the vertex shader.
-    glMatrixMode(GL_MODELVIEW);
-    glLoadMatrixf(&matrix[0][0]);
+//    for(int i = 0; i < 7; i++)
+//    {
+//        glMap1f(GL_MAP1_VERTEX_3, 0.0, 1.0, 3, 4, &curves[i][0][0]);
+//        glBegin(GL_LINE_STRIP);
+//        for (int j = 0; j <= 10; j++)
+//        {
+//            glEvalCoord1f((GLfloat) j/10.0);
+//        }
+//        glEnd();
+//    }
     
-    glUseProgram(m_program); //Enables shaders
-    glColor3f(0.0, 0.0, 0.0);
-    glDrawArrays(GL_TRIANGLES, 0, 3); //draw triangle
-    glUseProgram(0); //Disables shaders
     
-    glLoadIdentity();
-    
-    //Draws the bezier curves themselves using EvalCoord()
-    glColor3f(0.0, 1.0, 1.0);
-    for(int i = 0; i < 12; i++)
-    {
-        glMap1f(GL_MAP1_VERTEX_3, 0.0, 1.0, 3, 4, &curves[i][0][0]);
-        glBegin(GL_LINE_STRIP);
-          for (int i = 0; i <= 30; i++) 
-             glEvalCoord1f((GLfloat) i/30.0);
-        glEnd();
-    }
+//    for(int i = 0; i < 12; i++)
+//    {
+//        glBegin(GL_TRIANGLE_STRIP);
+//        for(int j = 0; j < 6; j++)
+//        {
+//            if(i != 11)
+//            {
+//                glVertex3f(curves[i][j][0], curves[i][j][1], curves[i][j][2]);
+//                glVertex3f(curves[i+1][j][0], curves[i+1][j][1], curves[i+1][j][2]);
+//            }
+//            else
+//            {
+//                glVertex3f(curves[i][j][0], curves[i][j][1], curves[i][j][2]);
+//                glVertex3f(curves[0][j][0], curves[0][j][1], curves[0][j][2]);
+//            }
+//        }
+//        glEnd();
+//    }
+//    
+
     
     glutSwapBuffers();  //swaps front and back buffer for double buffering
 }
@@ -272,7 +542,8 @@ void glutWidget::mouseHandler(int button, int state, int x, int y)
     switch(button)
     {
         case 0: //Left click
-            
+            x0 = x;
+            y0 = y;
             break;
         case 2: //Right click
             
@@ -291,7 +562,7 @@ void glutWidget::mouseHandler(int button, int state, int x, int y)
  Handles user event: a key was pressed
  */
 void glutWidget::keyDown(unsigned char key, int, int) 
-{  
+{
     switch(key)
     {
         case 'q':
@@ -305,11 +576,30 @@ void glutWidget::keyDown(unsigned char key, int, int)
             
             break;
         case 'w':
-            
+            glMatrixMode(GL_MODELVIEW);
+            //glTranslatef(.1 * sin(roty), .1 * -sin(rotx), .1 * -cos(roty));
+            cposx += .1 * sin(roty);
+            cposy += .1 * sin(rotx);
+            cposz -= .1 * cos(rotx);
+            break;
+        case 'a':
+            glMatrixMode(GL_MODELVIEW);
+            //glTranslatef(.1 * cos(roty), 0.0, .1 * sin(roty));
+            cposx -= .1;
             break;
         case 's':
-            
+            glMatrixMode(GL_MODELVIEW);
+            //glTranslatef(.1 * -sin(roty), .1 * sin(rotx), .1 * cos(roty));
+            cposx -= .1 * sin(roty);
+            cposy -= .1 * sin(rotx);
+            cposz += .1 * cos(rotx);
             break;
+        case 'd':
+            glMatrixMode(GL_MODELVIEW);
+            //glTranslatef(.1 * -cos(roty), 0.0, .1 * -sin(roty));
+            cposx += .1;
+            break;
+            
     }
 }
 
@@ -352,6 +642,26 @@ void glutWidget::specialKeyUp(int key, int, int)
             
             break;
     }
+}
+
+void glutWidget::mouseMove(int x, int y)
+{
+    float dx = ((x - x0)) / 5.0;
+    float dy = ((y - y0)) / 5.0;
+    
+    roty += dx * (3.14159265 / 180.0);
+    rotx -= dy * (3.14159265 / 180.0);
+    
+//    glMatrixMode(GL_MODELVIEW);
+//    glLoadIdentity();
+//    gluLookAt(0,0,5,2 * sin(roty), sin(rotx),2 * cos(roty),0,1,0);
+    //gluLookAt(2 * sin(roty), sin(rotx),2 * cos(roty),0,0,0,0,1,0);
+    
+    //glRotatef(dx, 0, 1.0, 0);
+    //glRotatef(dy, 1.0, 0.0, 0.0);
+    
+    x0 = x;
+    y0 = y;
 }
 
 
