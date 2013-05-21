@@ -27,6 +27,7 @@ float glutWidget::rotz = 0;
 float glutWidget::cposx = 0;
 float glutWidget::cposy = 0;
 float glutWidget::cposz = 5;
+float glutWidget::zoom = 10;
 
 static int degree = 20;
 static float t;
@@ -36,13 +37,14 @@ static unsigned int m_texture;
 GLfloat M[16];
 
 GLfloat cpoints[][3] = {
+        {2.5f, 3.5f, 0.0f},
         {2.0f, 3.0f, 0.0f},
         {1.8f, 2.7f, 0.0f},
         {2.8f, 2.2f, 0.0f},
         {3.0f, 1.0f, 0.0f},
         {1.0f, -1.0f, 0.0f}
 };
-size_t npts = 20;
+size_t npts = 24;
 size_t sec = 40;
 
 struct vec4f {
@@ -123,11 +125,12 @@ void bezier(float t, float & x, float & y, float & z) {
     float it = 1.0f -t;
 
     // calculate blending functions
-    float b0 = 1*t*t*t*t;
-    float b1 = 4*t*t*t*it;
-    float b2 = 6*t*t*it*it;
-    float b3 = 4*t*it*it*it;
-    float b4 = 1*it*it*it*it;
+    float b0 = 1*t*t*t*t*t;
+    float b1 = 5*t*t*t*t*it;
+    float b2 = 10*t*t*t*it*it;
+    float b3 = 10*t*t*it*it*it;
+    float b4 = 5*t*it*it*it*it;
+    float b5 = 1*it*it*it*it*it;
 
     // calculate the x,y and z of the curve point by summing
     // the Control vertices weighted by their respective blending
@@ -136,19 +139,22 @@ void bezier(float t, float & x, float & y, float & z) {
         b1*cpoints[1][0] +
         b2*cpoints[2][0] +
         b3*cpoints[3][0] +
-        b4*cpoints[4][0];
+        b4*cpoints[4][0] +
+        b5*cpoints[5][0];
 
     y = b0*cpoints[0][1] +
         b1*cpoints[1][1] +
         b2*cpoints[2][1] +
         b3*cpoints[3][1] +
-        b4*cpoints[4][1];
+        b4*cpoints[4][1] +
+        b5*cpoints[5][1];
 
     z = b0*cpoints[0][2] +
         b1*cpoints[1][2] +
         b2*cpoints[2][2] +
         b3*cpoints[3][2] +
-        b4*cpoints[4][2];
+        b4*cpoints[4][2] +
+        b5*cpoints[5][2];
 }
 
 GLfloat * myRotatef(GLfloat * m, GLfloat angle, GLfloat x, GLfloat y, GLfloat z) {
@@ -261,13 +267,11 @@ void glutWidget::initOpenGL()
     checkExtensions();
     glClearColor(0, 0, 0, 0);   //default "empty"/background color is set to white
     
-    glEnable(GL_CULL_FACE);
     glEnable(GL_DEPTH_TEST);
-    
-    float data[] = {0.0, 0.05, 0.0, 0.0, -0.05, 0.0, 0.1, 0.0, 0.0};
     
     CBitmap image("texture.bmp");               //read bitmap image
     glGenTextures(1, &m_texture);               //allocate 1 texture
+    glUniform1i(m_texture, 0);			//pass texture location to vertex shader
     glBindTexture(GL_TEXTURE_2D, m_texture);    //bind this texture to be active
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.GetWidth(), image.GetHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, image.GetBits());
 
@@ -276,16 +280,8 @@ void glutWidget::initOpenGL()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);        //specify texture coordinate treatment
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);        //specify texture coordinate treatment
 
+
     glBindTexture(GL_TEXTURE_2D, 0);    //bind default texture to be active
-    
-    //Initialize vertex buffer
-    glGenBuffers(1, &m_vertexbuffer);               //generate a vertex buffer
-    glBindBuffer(GL_ARRAY_BUFFER, m_vertexbuffer);  //bind buffer to be active
-    glBufferData(GL_ARRAY_BUFFER, sizeof(data), data, GL_STATIC_DRAW); //set buffer data
-    glVertexPointer(3, GL_FLOAT, 0, NULL); //Let OpenGl know that there are 3 coordinates per vertex
-    glEnableClientState(GL_VERTEX_ARRAY); //Let OpenGL know that the VBO contains verticies
-    glEnableVertexAttribArray(m_pos_attribute_location); //point to position attribute in shader
-    glVertexAttribPointer(m_pos_attribute_location, 3, GL_FLOAT, GL_FALSE, 0, 0); //indicates array data of position attribute  
     
     makeShaders();          //load data of fragment and vertex programs/shaders - compile shaders
     
@@ -295,8 +291,7 @@ void glutWidget::initOpenGL()
     
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();                       //initializes modelview matrix with identity
-    
-    glDisable(GL_CULL_FACE);
+
 }
 
 
@@ -311,7 +306,7 @@ void glutWidget::render()
     
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    gluLookAt(10 * sin(roty), 10 * sin(rotx), 10 * cos(roty),0,0,0,0,1,0);
+    gluLookAt(zoom * sin(roty), zoom * sin(rotx), zoom * cos(roty),0,0,0,0,1,0);
     
     float angle = -360.0f/sec;
     myRotatef(M, angle, 0.0f,1.0f,0.0f);
@@ -325,9 +320,10 @@ void glutWidget::render()
     
     vec4f curr_norm, next_norm;
     
+    //Enable shaders and textures
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, m_texture);
-    //glUseProgram(m_program);
+    glUseProgram(m_program);
     
     for(int i=0; i<sec; ++i) {
 
@@ -351,7 +347,7 @@ void glutWidget::render()
             vec4f outvec = curr_norm.cross(invec);
             curr_norm = curr_norm.cross(outvec);
             curr_norm.normalize();
-            //
+            
             vec4f invec2(-next_curves[j].x, 0.0f, -next_curves[j].z);
             vec4f outvec2 = next_norm.cross(invec2);
             next_norm = next_norm.cross(outvec2);
@@ -363,7 +359,7 @@ void glutWidget::render()
         }
         glEnd();
         
-        //Draw base of vase
+        //Draw bottom of vase
         glBegin(GL_TRIANGLES);
             glColor3f(1.0f,1.0f,1.0f); glNormal3f(0.0f,-1.0f,0.0f); glVertex3f(next_curves[npts-1].x, next_curves[npts-1].y, next_curves[npts-1].z);
             glColor3f(1.0f,1.0f,1.0f); glNormal3f(0.0f, -1.0f, 0.0f); glVertex3f(0.0f, cpoints[4][1], 0.0f);
@@ -374,158 +370,12 @@ void glutWidget::render()
         myRotatef(M, angle, 0.0f,1.0f,0.0f);
     }
         
-    //glUseProgram(0);
+    glUseProgram(0);
     glDisable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, 0);
 
     delete [] curr_curves;
     delete [] next_curves;
-
-
-    
-    //These are the control points for the bezier curves
-//    GLfloat curves[12][6][3] =
-//    {
-//        {
-//            {0.332, 0.564, -0},
-//            {0.26, 0.296, -0},
-//            {0.272, 0.06, -0},
-//            {0.384, -0.08, -0},
-//            {0.404, -0.252, -0},
-//            {0.308, -0.384, -0},
-//        },
-//        {
-//            {0.28752, 0.564, -0.166},
-//            {0.225167, 0.296, -0.13},
-//            {0.235559, 0.06, -0.136},
-//            {0.332554, -0.08, -0.192},
-//            {0.349874, -0.252, -0.202},
-//            {0.266736, -0.384, -0.154}
-//        },
-//        {
-//            {0.166, 0.564, -0.28752},
-//            {0.13, 0.296, -0.225167},
-//            {0.136, 0.06, -0.235559},
-//            {0.192, -0.08, -0.332554},
-//            {0.202, -0.252, -0.349874},
-//            {0.154, -0.384, -0.266736}
-//        },
-//        {
-//            {5.95906e-10, 0.564, -0.332},
-//            {4.66673e-10, 0.296, -0.26},
-//            {4.88212e-10, 0.06, -0.272},
-//            {6.8924e-10, -0.08, -0.384},
-//            {7.25138e-10, -0.252, -0.404},
-//            {5.52828e-10, -0.384, -0.308},
-//        },
-//        {
-//            {-0.166, 0.564, -0.28752},
-//            {-0.13, 0.296, -0.225167},
-//            {-0.136, 0.06, -0.235559},
-//            {-0.192, -0.08, -0.332554},
-//            {-0.202, -0.252, -0.349874},
-//            {-0.154, -0.384, -0.266736},
-//        },
-//        {
-//            {-0.28752, 0.564, -0.166},
-//            {-0.225167, 0.296, -0.13},
-//            {-0.235559, 0.06, -0.136},
-//            {-0.332554, -0.08, -0.192},
-//            {-0.349874, -0.252, -0.202},
-//            {-0.266736, -0.384, -0.154},
-//        },
-//        {
-//            {-0.332, 0.564, -1.19181e-09},
-//            {-0.26, 0.296, -9.33346e-10},
-//            {-0.272, 0.06, -9.76424e-10},
-//            {-0.384, -0.08, -1.37848e-09},
-//            {-0.404, -0.252, -1.45028e-09},
-//            {-0.308, -0.384, -1.10566e-09}
-//        },
-//        {
-//            {-0.28752, 0.564, 0.166},
-//            {-0.225167, 0.296, 0.13},
-//            {-0.235559, 0.06, 0.136},
-//            {-0.332554, -0.08, 0.192},
-//            {-0.349874, -0.252, 0.202},
-//            {-0.266736, -0.384, 0.154}
-//        },
-//        {
-//            {-0.166, 0.564, 0.28752},
-//            {-0.13, 0.296, 0.225167},
-//            {-0.136, 0.06, 0.235559},
-//            {-0.192, -0.08, 0.332554},
-//            {-0.202, -0.252, 0.349874},
-//            {-0.154, -0.384, 0.266736}
-//        },
-//        {
-//            {-1.78772e-09, 0.564, 0.332},
-//            {-1.40002e-09, 0.296, 0.26},
-//            {-1.46464e-09, 0.06, 0.272},
-//            {-2.06772e-09, -0.08, 0.384},
-//            {-2.17541e-09, -0.252, 0.404},
-//            {-1.65848e-09, -0.384, 0.308}
-//        },
-//        {
-//            {0.166, 0.564, 0.28752},
-//            {0.13, 0.296, 0.225167},
-//            {0.136, 0.06, 0.235559},
-//            {0.192, -0.08, 0.332554},
-//            {0.202, -0.252, 0.349874},
-//            {0.154, -0.384, 0.266736}
-//        },
-//        {
-//            {0.28752, 0.564, 0.166},
-//            {0.225167, 0.296, 0.13},
-//            {0.235559, 0.06, 0.136},
-//            {0.332554, -0.08, 0.192},
-//            {0.349874, -0.252, 0.202},
-//            {0.266736, -0.384, 0.154}
-//        }
-//    };
-    
-    //Rotation/translation matrix
-//    float matrix[4][4] = 
-//    {
-//        {cos(), 0, -sin(), 0},
-//        {0, 1, 0, 0},
-//        {-sin(), 0, cos(), 0},
-//        {0, 0, 0, 1}
-//    };
-    
-    
-//    for(int i = 0; i < 7; i++)
-//    {
-//        glMap1f(GL_MAP1_VERTEX_3, 0.0, 1.0, 3, 4, &curves[i][0][0]);
-//        glBegin(GL_LINE_STRIP);
-//        for (int j = 0; j <= 10; j++)
-//        {
-//            glEvalCoord1f((GLfloat) j/10.0);
-//        }
-//        glEnd();
-//    }
-    
-    
-//    for(int i = 0; i < 12; i++)
-//    {
-//        glBegin(GL_TRIANGLE_STRIP);
-//        for(int j = 0; j < 6; j++)
-//        {
-//            if(i != 11)
-//            {
-//                glVertex3f(curves[i][j][0], curves[i][j][1], curves[i][j][2]);
-//                glVertex3f(curves[i+1][j][0], curves[i+1][j][1], curves[i+1][j][2]);
-//            }
-//            else
-//            {
-//                glVertex3f(curves[i][j][0], curves[i][j][1], curves[i][j][2]);
-//                glVertex3f(curves[0][j][0], curves[0][j][1], curves[0][j][2]);
-//            }
-//        }
-//        glEnd();
-//    }
-//    
-
     
     glutSwapBuffers();  //swaps front and back buffer for double buffering
 }
@@ -576,28 +426,16 @@ void glutWidget::keyDown(unsigned char key, int, int)
             
             break;
         case 'w':
-            glMatrixMode(GL_MODELVIEW);
-            //glTranslatef(.1 * sin(roty), .1 * -sin(rotx), .1 * -cos(roty));
-            cposx += .1 * sin(roty);
-            cposy += .1 * sin(rotx);
-            cposz -= .1 * cos(rotx);
+            zoom /= 1.2;
             break;
         case 'a':
-            glMatrixMode(GL_MODELVIEW);
-            //glTranslatef(.1 * cos(roty), 0.0, .1 * sin(roty));
-            cposx -= .1;
+
             break;
         case 's':
-            glMatrixMode(GL_MODELVIEW);
-            //glTranslatef(.1 * -sin(roty), .1 * sin(rotx), .1 * cos(roty));
-            cposx -= .1 * sin(roty);
-            cposy -= .1 * sin(rotx);
-            cposz += .1 * cos(rotx);
+            zoom *= 1.2;
             break;
         case 'd':
-            glMatrixMode(GL_MODELVIEW);
-            //glTranslatef(.1 * -cos(roty), 0.0, .1 * -sin(roty));
-            cposx += .1;
+
             break;
             
     }

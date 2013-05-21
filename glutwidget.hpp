@@ -18,6 +18,7 @@ private:
     static int x0, y0;
     static float rotx, roty, rotz;
     static float cposx, cposy, cposz;
+    static float zoom;
     static void render();
     static void update();
     static void mouseHandler(int button, int state, int x, int y);
