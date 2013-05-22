@@ -13,7 +13,9 @@ cmake
 
 
 Overview:
-
+Draws a vase by revolving a Bezier curve around the y axis. Uses smooth shading
+as well as texture mapping. The camera is a bit awkward, but it should be easy
+to look inside the vase by zooming in far enough.
 
 
 Commands to create makefile + compile + run:
@@ -24,4 +26,6 @@ make
 
 Controls:
 
-Quit                ESC, Q
+Camera Zoom/Translation    W, S
+Camera Rotation            Mouse Click and Drag
+Quit                       ESC, Q

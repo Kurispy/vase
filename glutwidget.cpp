@@ -44,8 +44,8 @@ GLfloat cpoints[][3] = {
         {3.0f, 1.0f, 0.0f},
         {1.0f, -1.0f, 0.0f}
 };
-size_t npts = 24;
-size_t sec = 40;
+size_t npts = 24; //Number of points per curve
+size_t sec = 40; //Number of curves per surface (at 40, 1 curve every 9 degrees)
 
 struct vec4f {
     float x, y, z, w;
@@ -108,6 +108,7 @@ struct vec4f {
     }
 };
 
+//Function for multiplying matrices with vectors
 vec4f multiply(GLfloat * m, vec4f & v) {
     // v' = m*v
     vec4f v_new;
@@ -157,6 +158,7 @@ void bezier(float t, float & x, float & y, float & z) {
         b5*cpoints[5][2];
 }
 
+//Creates a rotation matrix of angle degrees around the axis given by x, y, and z and stores it in m
 GLfloat * myRotatef(GLfloat * m, GLfloat angle, GLfloat x, GLfloat y, GLfloat z) {
     GLfloat len = sqrt(x*x+y*y+z*z);
     x /= len;
@@ -189,7 +191,6 @@ GLfloat * myRotatef(GLfloat * m, GLfloat angle, GLfloat x, GLfloat y, GLfloat z)
     m[14] = 0.0f;
     m[15] = 1.0f;
 
-//    glMultMatrixf(m);
     return m;
 }
 
@@ -271,7 +272,7 @@ void glutWidget::initOpenGL()
     
     CBitmap image("texture.bmp");               //read bitmap image
     glGenTextures(1, &m_texture);               //allocate 1 texture
-    glUniform1i(m_texture, 0);			//pass texture location to vertex shader
+    glUniform1i(m_texture, 0);			        //pass texture location to vertex shader
     glBindTexture(GL_TEXTURE_2D, m_texture);    //bind this texture to be active
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.GetWidth(), image.GetHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, image.GetBits());
 
@@ -306,11 +307,12 @@ void glutWidget::render()
     
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    gluLookAt(zoom * sin(roty), zoom * sin(rotx), zoom * cos(roty),0,0,0,0,1,0);
+    gluLookAt(zoom * sin(roty), zoom * sin(rotx), zoom * cos(roty),0,0,0,0,1,0); //Camera rotation/translation is done here
     
     float angle = -360.0f/sec;
     myRotatef(M, angle, 0.0f,1.0f,0.0f);
     
+    //We need both the current rotation and the next rotation of the Bezier curve so we can draw a triangle strip
     vec4f * curr_curves = new vec4f[npts];
     vec4f * next_curves = new vec4f[npts];
     for(int j=0; j<npts; ++j) {
@@ -318,6 +320,7 @@ void glutWidget::render()
         bezier(u, curr_curves[j].x, curr_curves[j].y, curr_curves[j].z);
     }
     
+    //Same for normals; these will be available in the vertex shader
     vec4f curr_norm, next_norm;
     
     //Enable shaders and textures
@@ -326,7 +329,8 @@ void glutWidget::render()
     glUseProgram(m_program);
     
     for(int i=0; i<sec; ++i) {
-
+        
+        //Draws the sides of the vase, one strip at a time
         glBegin(GL_TRIANGLE_STRIP);
         for(int j=0; j<npts; ++j) {
             next_curves[j] = multiply(M, curr_curves[j]);
@@ -343,6 +347,7 @@ void glutWidget::render()
                 curr_norm.normalize();
                 next_norm = multiply(M, curr_norm);
             }
+            //Compute normals
             vec4f invec(-curr_curves[j].x, 0.0f, -curr_curves[j].z);
             vec4f outvec = curr_norm.cross(invec);
             curr_norm = curr_norm.cross(outvec);
@@ -359,10 +364,10 @@ void glutWidget::render()
         }
         glEnd();
         
-        //Draw bottom of vase
+        //Draw triangle for the bottom of the vase
         glBegin(GL_TRIANGLES);
             glColor3f(1.0f,1.0f,1.0f); glNormal3f(0.0f,-1.0f,0.0f); glVertex3f(next_curves[npts-1].x, next_curves[npts-1].y, next_curves[npts-1].z);
-            glColor3f(1.0f,1.0f,1.0f); glNormal3f(0.0f, -1.0f, 0.0f); glVertex3f(0.0f, cpoints[4][1], 0.0f);
+            glColor3f(1.0f,1.0f,1.0f); glNormal3f(0.0f, -1.0f, 0.0f); glVertex3f(0.0f, cpoints[5][1], 0.0f);
             glColor3f(1.0f,1.0f,1.0f); glNormal3f(0.0f,-1.0f,0.0f); glVertex3f(curr_curves[npts-1].x, curr_curves[npts-1].y, curr_curves[npts-1].z);
         glEnd();
 
